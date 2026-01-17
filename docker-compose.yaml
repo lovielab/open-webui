@@ -5,6 +5,10 @@ services:
       dockerfile: Dockerfile
     image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG-main}
     container_name: open-webui
+    ulimits:
+      nofile:
+        soft: "965536"
+        hard: "965536"
     volumes:
       - open-webui:/app/backend/data
     ports:
