@@ -29,7 +29,7 @@ from fastapi import (
     APIRouter,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 
@@ -42,6 +42,9 @@ from open_webui.config import (
     CACHE_DIR,
     WHISPER_LANGUAGE,
     ELEVENLABS_API_BASE_URL,
+    ELEVENLABS_VOICE_ID,
+    ELEVENLABS_MODEL,
+    ELEVENLABS_API_KEY,
 )
 
 from open_webui.constants import ERROR_MESSAGES
@@ -325,6 +328,50 @@ def load_speech_pipeline(request):
             "Matthijs/cmu-arctic-xvectors", split="validation"
         )
 
+
+from typing import AsyncGenerator
+
+@router.get("/stream-speech")
+async def stream_speech(request: Request, user=Depends(get_verified_user)):
+    # Validate Authorization header
+    auth_header = request.headers.get("Authorization")
+    # if not auth_header or auth_header != f"Bearer {AUTH_TOKEN}":
+    #     raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Parse query parameters
+    params = dict(request.query_params)
+    text = params.get("text")
+    voice_id = params.get("voiceId", ELEVENLABS_VOICE_ID)
+    model_id = params.get("modelId", ELEVENLABS_MODEL)
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text parameter is required")
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream?enable_logging=true"
+    payload = {
+        "text": text,
+        "model_id": model_id,
+        "output_format": "opus_48000_32",
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "xi-api-key": ELEVENLABS_API_KEY,
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, stream=True)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        async def audio_stream_generator() -> AsyncGenerator[bytes, None]:
+            for chunk in response.iter_content(chunk_size=1024):
+                if chunk:
+                    yield chunk
+
+        return StreamingResponse(audio_stream_generator(), media_type="audio/ogg")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/speech")
 async def speech(request: Request, user=Depends(get_verified_user)):
